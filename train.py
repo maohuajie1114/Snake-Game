@@ -86,7 +86,7 @@ def train():
     os.makedirs("buffers", exist_ok=True)
 
     env = SnakeEnv()
-    agent = DQNAgent(state_dim=14, action_dim=3)
+    agent = DQNAgent(state_dim=17, action_dim=3)
 
     global_step = 0
     scores_history = []

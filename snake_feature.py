@@ -34,8 +34,9 @@ class SnakeEnv(gym.Env):
         # Action space: 0: Go straight, 1: Turn right, 2: Turn left
         self.action_space = spaces.Discrete(3)
 
-        # Observation space: 14-dimensional feature vector (11 basic + 3 Flood Fill)
-        self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(14,), dtype=np.float32)
+        # Observation space: 17-dimensional feature vector
+        # (11 basic + 3 Flood Fill + 3 Tail Reachability)
+        self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(17,), dtype=np.float32)
 
         # Internal game state variables
         self.snake: list[Tuple[int, int]] = []
@@ -171,8 +172,51 @@ class SnakeEnv(gym.Env):
         # Return the normalized space ratio
         return free_space / max_search
 
+    def _can_reach_tail(self, start_pt: Tuple[int, int]) -> float:
+        """
+        Uses BFS to detect if there is a safe path from start_pt to the snake's tail.
+        Returns 1.0 for connected (safe), 0.0 for not connected (dead end danger).
+        """
+        tail = self.snake[-1]
+
+        # 1. Basic out-of-bounds or wall collision check
+        if (start_pt[0] < 0 or start_pt[0] >= self.grid_size or
+                start_pt[1] < 0 or start_pt[1] >= self.grid_size):
+            return 0.0
+
+        # 2. If the next step is exactly the tail's position, it's absolutely safe (because the tail will move away when the snake moves forward)
+        if start_pt == tail:
+            return 1.0
+
+        # 3. Treat the snake's body (excluding the tail) as an absolute obstacle
+        obstacles = set(self.snake[:-1])
+        if start_pt in obstacles:
+            return 0.0
+
+        # 4. BFS pathfinding
+        visited = set([start_pt])
+        queue = deque([start_pt])
+
+        while queue:
+            curr = queue.popleft()
+
+            # Expand in four directions
+            for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+                nxt = (curr[0] + dx, curr[1] + dy)
+
+                # Check boundaries
+                if 0 <= nxt[0] < self.grid_size and 0 <= nxt[1] < self.grid_size:
+                    if nxt == tail:
+                        return 1.0  # Found the tail, return safe immediately
+
+                    if nxt not in visited and nxt not in obstacles:
+                        visited.add(nxt)
+                        queue.append(nxt)
+
+        return 0.0  # Traversed the connected area without finding the tail, indicating a dead end
+
     def _get_state(self) -> np.ndarray:
-        """Extract a 14-dimensional feature vector, including basic relative features and Flood Fill spatial features"""
+        """Extract a 17-dimensional feature vector, including basic, Flood Fill, and tail reachability features"""
         head = self.snake[0]
 
         def is_danger(offset: Tuple[int, int]) -> bool:
@@ -215,11 +259,17 @@ class SnakeEnv(gym.Env):
         space_right = self._get_free_space(pt_right)
         space_left = self._get_free_space(pt_left)
 
+        # 5. Tail reachability features
+        tail_straight = self._can_reach_tail(pt_straight)
+        tail_right = self._can_reach_tail(pt_right)
+        tail_left = self._can_reach_tail(pt_left)
+
         state = [
             danger_straight, danger_right, danger_left,
             dir_r_flag, dir_d_flag, dir_l_flag, dir_u_flag,
             food_left, food_right, food_up, food_down,
-            space_straight, space_right, space_left
+            space_straight, space_right, space_left,
+            tail_straight, tail_right, tail_left
         ]
         return np.array(state, dtype=np.float32)
 
