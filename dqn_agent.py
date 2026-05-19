@@ -84,7 +84,7 @@ class DQNAgent:
         self.lr = lr
 
         self.epsilon = 1.0
-        self.epsilon_min = 0.01
+        self.epsilon_min = 0.001
         self.epsilon_decay = 0.995
 
         # Increase capacity for better DQN stability

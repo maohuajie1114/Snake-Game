@@ -39,33 +39,42 @@ def plot_training_curve(scores: list, save_path: str = "training_curve.png") -> 
     print(f"Training curve saved to {save_path}")
 
 
-def evaluate_and_record(agent: DQNAgent, step: int, save_dir: str = "eval_videos") -> None:
-    """Triggers an isolated environment to play one greedy game and record it to an mp4."""
+def evaluate_and_record(agent: DQNAgent, step: int, num_episodes: int = 5, save_dir: str = "eval_videos") -> float:
+    """
+    Performs noise-free, purely greedy evaluation.
+    The first episode is silently recorded and saved as an mp4 video; subsequent episodes are run only to calculate the average score.
+    """
     os.makedirs(save_dir, exist_ok=True)
-    print(f"--- Triggering Evaluation & Video Recording at Step {step} ---")
+    print(f"\n--- Triggering Evaluation at Step {step} ---")
 
-    # Wrap environment with RecordVideo.
-    # Notice we instantiate a fresh environment specifically for recording to prevent state leakage.
-    base_env = SnakeEnv(render_mode="rgb_array")
-    env = RecordVideo(
-        base_env,
-        video_folder=save_dir,
-        name_prefix=f"dqn_step_{step}",
-        episode_trigger=lambda x: True,  # Record every episode in this isolated wrapper
-        disable_logger=True
-    )
+    eval_scores = []
 
-    state, _ = env.reset()
-    done = False
+    for ep in range(num_episodes):
+        # Only record the 0-th episode, the rest are just for calculating the score to speed things up
+        if ep == 0:
+            base_env = SnakeEnv(render_mode="rgb_array")
+            env = RecordVideo(
+                base_env,
+                video_folder=os.path.join(save_dir, f"step_{step}"),
+                episode_trigger=lambda x: True,
+                disable_logger=True
+            )
+        else:
+            env = SnakeEnv(render_mode=None)
 
-    while not done:
-        # Strict exploitation (greedy=True) for evaluation
-        action = agent.act(state, greedy=True)
-        state, _, terminated, truncated, _ = env.step(action)
-        done = terminated or truncated
+        state, _ = env.reset()
+        done = False
+        while not done:
+            action = agent.act(state, greedy=True)  # Strictly noise-free evaluation
+            state, _, terminated, truncated, info = env.step(action)
+            done = terminated or truncated
 
-    env.close()
-    print(f"Video saved in {save_dir}/step_{step}")
+        eval_scores.append(info['score'])
+        env.close()
+
+    avg_eval_score = np.mean(eval_scores)
+    print(f"Evaluation finished over {num_episodes} games. Scores: {eval_scores} | Avg: {avg_eval_score:.2f}")
+    return avg_eval_score
 
 
 def train():
@@ -77,7 +86,7 @@ def train():
     args = parser.parse_args()
 
     # Constraints parameters
-    MAX_TIME_SECONDS = 12 * 3600  # 12 Hours
+    MAX_TIME_SECONDS = 12 * 3600  # Training duration (Hours)
     CHECKPOINT_INTERVAL = 100_000  # Save & Record every 100k steps
     TARGET_UPDATE_FREQ = 10_000  # Hard update target network every 10k steps
 
@@ -110,7 +119,7 @@ def train():
 
     if file_mode == 'w':
         # Only write the header for a new training session
-        csv_writer.writerow(["Step", "Score"])
+        csv_writer.writerow(["Step", "Train_Score", "Eval_Score"])
     # ===================================================
 
     print("=======================================")
@@ -128,10 +137,10 @@ def train():
                 # Time limit enforcement
                 elapsed_time = time.time() - start_time
                 if elapsed_time > MAX_TIME_SECONDS:
-                    print("\n[Time Limit Reached] 12 hours elapsed. Commencing safe shutdown...")
+                    print("\n[Time Limit Reached] Commencing safe shutdown...")
                     raise KeyboardInterrupt
 
-                    # 1. Step in Environment
+                # 1. Step in Environment
                 action = agent.act(state, greedy=False)
                 next_state, reward, terminated, truncated, info = env.step(action)
                 done = terminated or truncated
@@ -155,15 +164,21 @@ def train():
                     agent.memory.save(buf_path)
                     print(f"Checkpoint saved to {ckpt_path}")
 
-                    evaluate_and_record(agent, global_step)
+                    # Get the average score from the pure greedy evaluation
+                    avg_score = evaluate_and_record(agent, global_step)
+                    csv_writer.writerow([global_step, episode_score, avg_score])
+                    csv_file.flush()
                     next_checkpoint_step += CHECKPOINT_INTERVAL
+
+                    print(
+                        f"Step: {global_step} | Episodes: {len(scores_history)} | Epsilon: {agent.epsilon:.3f} | Last Eval Avg Score: {avg_score:.2f}")
 
             # End of Episode Processing
             episode_score = info['score']
             scores_history.append(episode_score)
 
             # ================= Write current step and score to CSV =================
-            csv_writer.writerow([global_step, episode_score])
+            csv_writer.writerow([global_step, episode_score, ""]) # When a normal training episode ends, Eval_Score is left empty ("") (indicating no evaluation was performed at this step)
             csv_file.flush()  # Force flush to disk to prevent data loss on crash
             # =====================================================================
 
