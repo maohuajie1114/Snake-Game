@@ -55,7 +55,8 @@ def evaluate_and_record(agent: DQNAgent, step: int, num_episodes: int = 5, save_
             base_env = SnakeEnv(render_mode="rgb_array")
             env = RecordVideo(
                 base_env,
-                video_folder=os.path.join(save_dir, f"step_{step}"),
+                video_folder=save_dir,
+                name_prefix=f"step_{step}",
                 episode_trigger=lambda x: True,
                 disable_logger=True
             )
