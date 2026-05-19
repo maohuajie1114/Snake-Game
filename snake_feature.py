@@ -276,9 +276,11 @@ class SnakeEnv(gym.Env):
     def _init_pygame(self) -> None:
         if self.window is None:
             pygame.init()
+            pygame.font.init()
             pygame.display.set_caption('Snake RL Env (16x16)')
             self.window = pygame.display.set_mode((self.window_size, self.window_size))
             self.clock = pygame.time.Clock()
+            self.font = pygame.font.SysFont('arial', 24, bold=True)
 
     def render(self):
         if self.render_mode not in ["human", "rgb_array"]:
@@ -287,16 +289,49 @@ class SnakeEnv(gym.Env):
         self._init_pygame()
         self.window.fill((0, 0, 0))
 
-        # Draw snake body (green)
+        # Draw snake body (green body + white outline)
         for pt in self.snake:
-            pygame.draw.rect(self.window, (0, 255, 0),
-                             pygame.Rect(pt[0] * self.cell_size, pt[1] * self.cell_size, self.cell_size,
-                                         self.cell_size))
+            rect = pygame.Rect(pt[0] * self.cell_size, pt[1] * self.cell_size, self.cell_size,
+                               self.cell_size)
+            pygame.draw.rect(self.window, (0, 255, 0), rect)
+
+        outline_color = (0, 0, 0)
+        line_width = 2
+
+        for i, pt in enumerate(self.snake):
+            px, py = pt
+            x = px * self.cell_size
+            y = py * self.cell_size
+            cs = self.cell_size
+
+            # Find the nodes directly connected to the current node in the body sequence
+            connected_nodes = []
+            if i > 0:  # If there is a previous segment (towards the head)
+                connected_nodes.append(self.snake[i - 1])
+            if i < len(self.snake) - 1:  # If there is a next segment (towards the tail)
+                connected_nodes.append(self.snake[i + 1])
+
+            # Top edge: if the cell above is not a directly connected node in the sequence, draw a line
+            if (px, py - 1) not in connected_nodes:
+                pygame.draw.line(self.window, outline_color, (x, y), (x + cs, y), line_width)
+            # Bottom edge
+            if (px, py + 1) not in connected_nodes:
+                pygame.draw.line(self.window, outline_color, (x, y + cs), (x + cs, y + cs), line_width)
+            # Left edge
+            if (px - 1, py) not in connected_nodes:
+                pygame.draw.line(self.window, outline_color, (x, y), (x, y + cs), line_width)
+            # Right edge
+            if (px + 1, py) not in connected_nodes:
+                pygame.draw.line(self.window, outline_color, (x + cs, y), (x + cs, y + cs), line_width)
 
         # Draw food (red)
         pygame.draw.rect(self.window, (255, 0, 0),
                          pygame.Rect(self.food[0] * self.cell_size, self.food[1] * self.cell_size, self.cell_size,
                                      self.cell_size))
+
+        # Draw Scoreboard (yellow)
+        score_text = self.font.render(f'Score: {self.score}', True, (255, 255, 0))
+        self.window.blit(score_text, (10, 10))
 
         if self.render_mode == "human":
             pygame.display.flip()
