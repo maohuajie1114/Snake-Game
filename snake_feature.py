@@ -4,6 +4,7 @@ import numpy as np
 import pygame
 import random
 from typing import Tuple, Dict, Any, Optional
+from collections import deque
 
 
 class SnakeEnv(gym.Env):
@@ -33,8 +34,8 @@ class SnakeEnv(gym.Env):
         # Action space: 0: Go straight, 1: Turn right, 2: Turn left
         self.action_space = spaces.Discrete(3)
 
-        # Observation space: 11-dimensional feature vector (float between 0 and 1)
-        self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(11,), dtype=np.float32)
+        # Observation space: 14-dimensional feature vector (11 basic + 3 Flood Fill)
+        self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(14,), dtype=np.float32)
 
         # Internal game state variables
         self.snake: list[Tuple[int, int]] = []
@@ -132,43 +133,93 @@ class SnakeEnv(gym.Env):
         elif action == 2:  # Turn left
             self.direction = clock_wise[(idx - 1) % 4]
 
+    def _get_free_space(self, start_pt: Tuple[int, int]) -> float:
+        """
+        Uses BFS (Flood Fill) to calculate the number of safely connected cells starting from start_pt.
+        Returns the normalized ratio of available space (0.0 ~ 1.0).
+        """
+        # If the starting point is out of bounds or directly on the snake's body, the available space is 0
+        # (Note: For strict accuracy, we could ignore the snake's tail self.snake[-1], as it will be vacant after the snake moves one step forward,
+        # but to simplify the search and be conservatively safe, we treat the entire current snake body as an obstacle)
+        if (start_pt[0] < 0 or start_pt[0] >= self.grid_size or
+                start_pt[1] < 0 or start_pt[1] >= self.grid_size or
+                start_pt in self.snake):
+            return 0.0
+
+        visited = set()
+        queue = deque([start_pt])
+        visited.add(start_pt)
+        free_space = 0
+
+        # Maximum number of cells on the entire map
+        max_search = self.grid_size * self.grid_size
+
+        while queue and free_space < max_search:
+            curr = queue.popleft()
+            free_space += 1
+
+            # Iterate through the four adjacent cells (up, down, left, right)
+            for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+                nxt = (curr[0] + dx, curr[1] + dy)
+                # Check boundary conditions
+                if 0 <= nxt[0] < self.grid_size and 0 <= nxt[1] < self.grid_size:
+                    # Check if not visited and not an obstacle
+                    if nxt not in visited and nxt not in self.snake:
+                        visited.add(nxt)
+                        queue.append(nxt)
+
+        # Return the normalized space ratio
+        return free_space / max_search
+
     def _get_state(self) -> np.ndarray:
-        """Core feature engineering: extract an 11-dimensional relative feature vector"""
+        """Extract a 14-dimensional feature vector, including basic relative features and Flood Fill spatial features"""
         head = self.snake[0]
 
         def is_danger(offset: Tuple[int, int]) -> bool:
             pt = (head[0] + offset[0], head[1] + offset[1])
-            # The danger detection logic here is kept strictly consistent with the death condition logic
             return (pt[0] < 0 or pt[0] >= self.grid_size or
                     pt[1] < 0 or pt[1] >= self.grid_size or
                     pt in self.snake[1:])
 
         dir_r, dir_d, dir_l, dir_u = (1, 0), (0, 1), (-1, 0), (0, -1)
-
         clock_wise = [dir_r, dir_d, dir_l, dir_u]
         idx = clock_wise.index(self.direction)
+
         straight = clock_wise[idx]
         right = clock_wise[(idx + 1) % 4]
         left = clock_wise[(idx - 1) % 4]
 
+        # 1. Danger perception (1-step lookahead)
         danger_straight = int(is_danger(straight))
         danger_right = int(is_danger(right))
         danger_left = int(is_danger(left))
 
+        # 2. Current direction
         dir_r_flag = int(self.direction == dir_r)
         dir_d_flag = int(self.direction == dir_d)
         dir_l_flag = int(self.direction == dir_l)
         dir_u_flag = int(self.direction == dir_u)
 
+        # 3. Relative position of food
         food_left = int(self.food[0] < head[0])
         food_right = int(self.food[0] > head[0])
         food_up = int(self.food[1] < head[1])
         food_down = int(self.food[1] > head[1])
 
+        # 4. Flood Fill connected space features
+        pt_straight = (head[0] + straight[0], head[1] + straight[1])
+        pt_right = (head[0] + right[0], head[1] + right[1])
+        pt_left = (head[0] + left[0], head[1] + left[1])
+
+        space_straight = self._get_free_space(pt_straight)
+        space_right = self._get_free_space(pt_right)
+        space_left = self._get_free_space(pt_left)
+
         state = [
             danger_straight, danger_right, danger_left,
             dir_r_flag, dir_d_flag, dir_l_flag, dir_u_flag,
-            food_left, food_right, food_up, food_down
+            food_left, food_right, food_up, food_down,
+            space_straight, space_right, space_left
         ]
         return np.array(state, dtype=np.float32)
 
@@ -179,8 +230,8 @@ class SnakeEnv(gym.Env):
             self.window = pygame.display.set_mode((self.window_size, self.window_size))
             self.clock = pygame.time.Clock()
 
-    def render(self) -> None:
-        if self.render_mode != "human":
+    def render(self):
+        if self.render_mode not in ["human", "rgb_array"]:
             return
 
         self._init_pygame()
@@ -197,8 +248,17 @@ class SnakeEnv(gym.Env):
                          pygame.Rect(self.food[0] * self.cell_size, self.food[1] * self.cell_size, self.cell_size,
                                      self.cell_size))
 
-        pygame.display.flip()
-        self.clock.tick(self.metadata["render_fps"])
+        if self.render_mode == "human":
+            pygame.display.flip()
+            self.clock.tick(self.metadata["render_fps"])
+            return None
+        elif self.render_mode == "rgb_array":
+            # Recording mode: instead of flipping the display to the real screen, convert the in-memory Surface to a NumPy matrix
+            # The dimensions extracted by Pygame are (width, height, channels)
+            # RecordVideo expects dimensions of (height, width, channels), so a transpose is needed
+            img_array = pygame.surfarray.array3d(self.window)
+            return np.transpose(img_array, axes=(1, 0, 2))
+        return None
 
     def close(self) -> None:
         if self.window is not None:

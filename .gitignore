@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+buffers
+checkpoints
+eval_videos
+training_log.csv
+training_curve.png
