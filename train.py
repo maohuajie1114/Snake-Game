@@ -7,7 +7,7 @@ import gymnasium as gym
 from gymnasium.wrappers import RecordVideo
 import csv
 
-from snake_feature import SnakeEnv
+from env import SnakeEnv
 from dqn_agent import DQNAgent
 
 

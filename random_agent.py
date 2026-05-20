@@ -1,6 +1,6 @@
 import numpy as np
 from typing import List, Tuple, Any
-from snake_feature import SnakeEnv
+from env import SnakeEnv
 
 
 def make_env(render: bool) -> SnakeEnv:
