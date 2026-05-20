@@ -117,7 +117,7 @@ class SnakeEnv(gym.Env):
                 self._place_food()
         else:
             self.snake.pop()  # If no food is eaten, the tail shrinks to maintain the original length
-            reward = 0.0
+            reward = -0.01
 
         if self.render_mode == "human":
             self.render()
