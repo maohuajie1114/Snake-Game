@@ -26,7 +26,7 @@ def plot_from_csv(csv_path: str = "training_log.csv", save_path: str = "training
     # Read CSV data
     with open(csv_path, mode='r') as f:
         reader = csv.reader(f)
-        header = next(reader)  # Skip header ["Step", "Train_Score", "Eval_Score"]
+        header = next(reader)
 
         for row in reader:
             if not row: continue
@@ -60,27 +60,34 @@ def plot_from_csv(csv_path: str = "training_log.csv", save_path: str = "training
     # Start plotting
     plt.figure(figsize=(12, 6.5))
 
-    # Plot raw training scores as a light blue background
     plt.plot(train_steps, train_scores, alpha=0.1, color='royalblue', label='Train Score (Raw)')
-    # Plot the training score trend line (blue)
     plt.plot(smoothed_train_steps, smoothed_train_scores, color='royalblue', linewidth=1.5,
              label=f'Train Score (MA={window_size})')
 
-    # Plot the noise-free greedy evaluation curve (bold orange with markers)
     if len(eval_steps) > 0:
-        plt.plot(eval_steps, eval_scores, color='darkorange', marker='o', markersize=6,
-                 linewidth=2.5, label='Evaluation Score (Epsilon=0, Avg of 5)')
-        # Annotate the specific score above the data points
-        for x, y in zip(eval_steps, eval_scores):
-            plt.annotate(f"{y:.1f}", (x, y), textcoords="offset points", xytext=(0, 8), ha='center', fontsize=9,
-                         fontweight='bold', color='darkred')
+        plt.plot(eval_steps, eval_scores, color='darkorange', linewidth=2.5, label='Evaluation Score (Epsilon=0)')
+
+        max_annotations = 10
+        if len(eval_steps) > max_annotations:
+            indices = np.linspace(0, len(eval_steps) - 1, max_annotations).astype(int)
+        else:
+            indices = np.arange(len(eval_steps))
+
+        sampled_steps = eval_steps[indices]
+        sampled_scores = eval_scores[indices]
+
+        plt.plot(sampled_steps, sampled_scores, color='darkorange', marker='o', markersize=6, linestyle='None')
+
+        for x, y in zip(sampled_steps, sampled_scores):
+            plt.annotate(f"{y:.1f}", (x, y), textcoords="offset points", xytext=(0, 8),
+                         ha='center', fontsize=9, fontweight='bold', color='darkred')
 
     # chart details
     plt.title('DQN Snake: Training Exploration vs Policy Performance', fontsize=14, fontweight='bold')
     plt.xlabel('Training Steps', fontsize=12)
     plt.ylabel('Score (Max 192)', fontsize=12)
 
-    plt.ylim(-5, 205)  # Add padding for label visibility
+    plt.ylim(-5, 205)
     plt.grid(True, which='both', linestyle='--', linewidth=0.5, alpha=0.6)
     plt.legend(loc='upper left', frameon=True, facecolor='white', framealpha=0.9)
 
